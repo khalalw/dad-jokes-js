@@ -1,3 +1,6 @@
+/* eslint-disable consistent-return */
+/* eslint-disable no-console */
+/* eslint-disable no-underscore-dangle */
 const client = require('mongodb').MongoClient;
 const assert = require('assert');
 require('dotenv').config();
