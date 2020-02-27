@@ -18,8 +18,8 @@ app.post('/sms', respondToMessage);
 function setupScheduler() {
   const rule = new schedule.RecurrenceRule();
   rule.dayOfWeek = [new schedule.Range(1, 5)];
-  rule.hour = 2;
-  rule.minute = 25;
+  rule.hour = 9;
+  rule.minute = 0;
   rule.tz = 'US/Pacific';
   return rule;
 }
@@ -102,17 +102,17 @@ function respondToMessage(req, res) {
     twiml.message(response);
     res.writeHead(200, { 'Content-Type': 'text/xml' });
     res.end(twiml.toString());
-  }
 
-  function handleResponse(incomingMessage) {
-    const responses = {
-      dad: `Thank you for signing up for you daily dose of dad jokes. 
-              You'll receive one joke everyday. To opt out at any time, reply with STOP or 9.`,
-      '9': `You are now unsubscribed from receiving daily dad jokes.`,
-      '7': `Dad Jokez: If you would like to receive an automadted joke once a day, reply DAD. 
-              To stop receiving messages completely, reply STOP.`
-    };
-    return responses[incomingMessage] || responses['7'];
+    function handleResponse(incomingMessage) {
+      const responses = {
+        dad: `Thank you for signing up for you daily dose of dad jokes. 
+                You'll receive one joke everyday. To opt out at any time, reply with STOP or 9.`,
+        '9': `You are now unsubscribed from receiving daily dad jokes.`,
+        '7': `Dad Jokez: If you would like to receive an automadted joke once a day, reply DAD. 
+                To stop receiving messages completely, reply STOP.`
+      };
+      return responses[incomingMessage] || responses['7'];
+    }
   }
 
   function findRecord(phoneNumber) {
