@@ -1,6 +1,15 @@
 /* eslint-disable no-console */
 require('dotenv').config();
 
+// Environmental Variables
+const {
+  COLLECTION: collectionName,
+  ACCOUNT_SID: accountSid,
+  AUTH_TOKEN: authToken,
+  DB: dbName,
+  OUTGOING_NUMBER: outgoingNumber
+} = process.env;
+
 const http = require('http');
 const { urlencoded } = require('body-parser');
 const app = require('express')();
@@ -9,20 +18,21 @@ const {
   twiml: { MessagingResponse }
 } = require('twilio');
 
-const client = require('twilio')(process.env.ACCOUNT_SID, process.env.AUTH_TOKEN);
+const client = require('twilio')(accountSid, authToken);
 const schedule = require('node-schedule');
 const fetch = require('node-fetch');
 
 const { initDb, getDb } = require('./db');
 const { optOutKeywords, helpKeywords } = require('./constants');
 
+// Only accepting US numbers
 function isNumberValid(phoneNumber) {
   return phoneNumber.length === 12 && phoneNumber.slice(0, 2) === '+1';
 }
 
 function handleResponse(incomingMessage) {
   const responses = {
-    dad: `Thank you for signing up for you daily dose of dad jokes. You'll receive one joke everyday. To opt out at any time, reply with STOP or 9.`,
+    dad: `Thank you for signing up for you daily dose of dad jokes. You'll receive one joke everyday. To opt out at any time, reply with STOP.`,
     help: `Dad Jokez: If you would like to receive an automated joke once a day, reply DAD. To stop receiving messages completely, reply STOP.`
   };
   return responses[incomingMessage] || responses.help;
@@ -38,14 +48,14 @@ function sendResponse(incomingMessage, outgoingMessage, twiml, res) {
 
 function findRecord(db, phoneNumber) {
   return db
-    .collection(process.env.COLLECTION)
+    .collection(collectionName)
     .find({ phoneNumber })
     .toArray();
 }
 
 function updateDb(db, action, phoneNumber) {
   let logMessage;
-  const collection = db.collection(process.env.COLLECTION);
+  const collection = db.collection(collectionName);
   switch (action) {
     case 'insert':
       collection.insertOne({ phoneNumber });
@@ -56,14 +66,14 @@ function updateDb(db, action, phoneNumber) {
       logMessage = `One document removed - ${phoneNumber}`;
       break;
     default:
-      logMessage = 'Please enter a valid action';
+      throw new Error('Please enter a valid action');
   }
 
   console.log(logMessage);
 }
 
 function respondToMessage(req, res) {
-  const db = getDb().db(process.env.DB);
+  const db = getDb().db(dbName);
   const twiml = new MessagingResponse();
   const incomingMsg = req.body.Body.trim().toLowerCase();
   const phoneNumber = req.body.From;
@@ -72,37 +82,23 @@ function respondToMessage(req, res) {
     res.end();
   }
 
-  findRecord(db, phoneNumber).then(
-    val => {
-      if (val.length) {
-        if (incomingMsg === 'dad') {
-          sendResponse(null, `You're already signed up to receive daily dad jokes.`, twiml, res);
-        } else if (optOutKeywords.includes(incomingMsg)) {
-          updateDb(db, 'delete', phoneNumber);
-        }
-      } else if (incomingMsg === 'dad' && !val.length) {
-        updateDb(db, 'insert', phoneNumber);
-        sendResponse(incomingMsg, null, twiml, res);
-      } else {
-        sendResponse(incomingMsg, null, twiml, res);
+  findRecord(db, phoneNumber).then(val => {
+    if (val.length) {
+      if (incomingMsg === 'dad') {
+        sendResponse(null, `You're already signed up to receive daily dad jokes.`, twiml, res);
+      } else if (optOutKeywords.includes(incomingMsg)) {
+        updateDb(db, 'delete', phoneNumber);
       }
-    },
-    err => {
-      throw new Error(err);
+    } else if (incomingMsg === 'dad' && !val.length) {
+      updateDb(db, 'insert', phoneNumber);
+      sendResponse(incomingMsg, null, twiml, res);
+    } else {
+      sendResponse(incomingMsg, null, twiml, res);
     }
-  );
+  });
 }
 
-function sendMessage(body, phoneNumber) {
-  client.messages
-    .create({
-      body,
-      from: process.env.OUTGOING_NUMBER,
-      to: phoneNumber
-    })
-    .then(({ sid }) => console.log(`Messages sent - ${sid}`));
-}
-
+// Message scheduling
 async function getDadJoke() {
   const response = await fetch('https://icanhazdadjoke.com/', {
     headers: { Accept: 'application/json' }
@@ -110,13 +106,23 @@ async function getDadJoke() {
   return response.json();
 }
 
+function sendMessage(body, phoneNumber) {
+  client.messages
+    .create({
+      body,
+      from: outgoingNumber,
+      to: phoneNumber
+    })
+    .then(({ sid }) => console.log(`Messages sent - ${sid}`));
+}
+
 async function sendJokes() {
   console.log('Sending daily message...');
   const { joke } = await getDadJoke();
 
   getDb()
-    .db(process.env.DB)
-    .collection(process.env.COLLECTION)
+    .db(dbName)
+    .collection(collectionName)
     .find()
     .toArray()
     .then(list => {
