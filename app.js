@@ -46,10 +46,10 @@ function sendResponse(incomingMessage, outgoingMessage, twiml, res) {
   res.end(twiml.toString());
 }
 
-function findRecord(db, phoneNumber) {
+function findRecords(db, phoneNumber) {
   return db
     .collection(collectionName)
-    .find({ phoneNumber })
+    .find(phoneNumber ? { phoneNumber } : null)
     .toArray();
 }
 
@@ -72,7 +72,7 @@ function updateDb(db, action, phoneNumber) {
   console.log(logMessage);
 }
 
-function respondToMessage(req, res) {
+async function respondToMessage(req, res) {
   const db = getDb().db(dbName);
   const twiml = new MessagingResponse();
   const incomingMsg = req.body.Body.trim().toLowerCase();
@@ -82,20 +82,20 @@ function respondToMessage(req, res) {
     res.end();
   }
 
-  findRecord(db, phoneNumber).then(val => {
-    if (val.length) {
-      if (incomingMsg === 'dad') {
-        sendResponse(null, `You're already signed up to receive daily dad jokes.`, twiml, res);
-      } else if (optOutKeywords.includes(incomingMsg)) {
-        updateDb(db, 'delete', phoneNumber);
-      }
-    } else if (incomingMsg === 'dad' && !val.length) {
-      updateDb(db, 'insert', phoneNumber);
-      sendResponse(incomingMsg, null, twiml, res);
-    } else {
-      sendResponse(incomingMsg, null, twiml, res);
+  const [record] = await findRecords(db, phoneNumber);
+
+  if (record) {
+    if (incomingMsg === 'dad') {
+      sendResponse(null, `You're already signed up to receive daily dad jokes.`, twiml, res);
+    } else if (optOutKeywords.includes(incomingMsg)) {
+      updateDb(db, 'delete', phoneNumber);
     }
-  });
+  } else if (incomingMsg === 'dad' && !record) {
+    updateDb(db, 'insert', phoneNumber);
+    sendResponse(incomingMsg, null, twiml, res);
+  } else {
+    sendResponse(incomingMsg, null, twiml, res);
+  }
 }
 
 // Message scheduling
@@ -119,22 +119,19 @@ function sendMessage(body, phoneNumber) {
 async function sendJokes() {
   console.log('Sending daily message...');
   const { joke } = await getDadJoke();
+  const db = getDb().db(dbName);
+  const numberList = await findRecords(db);
 
-  getDb()
-    .db(dbName)
-    .collection(collectionName)
-    .find()
-    .toArray()
-    .then(list => {
-      list.forEach(({ phoneNumber }) => sendMessage(joke, phoneNumber));
-    });
+  numberList.forEach(({ phoneNumber }) => {
+    sendMessage(joke, phoneNumber);
+  });
 }
 
 function setupScheduler() {
   const rule = new schedule.RecurrenceRule();
   rule.dayOfWeek = [new schedule.Range(1, 5)];
-  rule.hour = 9;
-  rule.minute = 0;
+  rule.hour = 23;
+  rule.minute = 20;
   rule.tz = 'US/Pacific';
   return rule;
 }
