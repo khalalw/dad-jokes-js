@@ -1,9 +1,12 @@
+/* eslint-disable no-unused-expressions */
+/* eslint-disable no-await-in-loop */
 /* eslint-disable no-console */
 require('dotenv').config();
 
 // Environmental Variables
 const {
-  COLLECTION: collectionName,
+  SUB_COLLECTION: subs,
+  JOKE_COLLECTION: prevJokes,
   ACCOUNT_SID: accountSid,
   AUTH_TOKEN: authToken,
   DB: dbName,
@@ -46,24 +49,26 @@ function sendResponse(incomingMessage, outgoingMessage, twiml, res) {
   res.end(twiml.toString());
 }
 
-function findRecords(db, phoneNumber) {
+function findRecords(db, record, collectionName) {
   return db
     .collection(collectionName)
-    .find(phoneNumber ? { phoneNumber } : null)
+    .find(record || null)
     .toArray();
 }
 
-function updateDb(db, action, phoneNumber) {
+function updateDb(db, action, record, collectionName) {
   let logMessage;
   const collection = db.collection(collectionName);
+  const [val] = Object.values(record);
+
   switch (action) {
     case 'insert':
-      collection.insertOne({ phoneNumber });
-      logMessage = `One document added - ${phoneNumber}`;
+      collection.insertOne(record);
+      logMessage = `One document added - ${val}`;
       break;
     case 'delete':
-      collection.deleteOne({ phoneNumber });
-      logMessage = `One document removed - ${phoneNumber}`;
+      collection.deleteOne(record);
+      logMessage = `One document removed - ${val}`;
       break;
     default:
       throw new Error('Please enter a valid action');
@@ -82,16 +87,16 @@ async function respondToMessage(req, res) {
     res.end();
   }
 
-  const [record] = await findRecords(db, phoneNumber);
+  const [record] = await findRecords(db, { phoneNumber }, subs);
 
   if (record) {
     if (incomingMsg === 'dad') {
       sendResponse(null, `You're already signed up to receive daily dad jokes.`, twiml, res);
     } else if (optOutKeywords.includes(incomingMsg)) {
-      updateDb(db, 'delete', phoneNumber);
+      updateDb(db, 'delete', { phoneNumber }, subs);
     }
   } else if (incomingMsg === 'dad' && !record) {
-    updateDb(db, 'insert', phoneNumber);
+    updateDb(db, 'insert', { phoneNumber }, subs);
     sendResponse(incomingMsg, null, twiml, res);
   } else {
     sendResponse(incomingMsg, null, twiml, res);
@@ -99,11 +104,32 @@ async function respondToMessage(req, res) {
 }
 
 // Message scheduling
-async function getDadJoke() {
+async function fetchDadJoke() {
   const response = await fetch('https://icanhazdadjoke.com/', {
     headers: { Accept: 'application/json' }
   });
   return response.json();
+}
+
+async function prepareDadJoke() {
+  const db = getDb().db(dbName);
+  let record;
+  let joke;
+  let isJokeInDb = false;
+
+  do {
+    const { id: jokeId, joke: _joke } = await fetchDadJoke();
+    record = { jokeId };
+
+    const [prevJoke] = await findRecords(db, record, prevJokes);
+    isJokeInDb = !!prevJoke;
+
+    isJokeInDb && console.log('Duplicate joke found, fetching another');
+    !isJokeInDb && (joke = _joke);
+  } while (isJokeInDb);
+
+  updateDb(db, 'insert', record, prevJokes);
+  return joke;
 }
 
 async function sendMessage(body, phoneNumber) {
@@ -119,22 +145,28 @@ async function sendMessage(body, phoneNumber) {
 
 async function sendJokes() {
   console.log('Sending daily message...');
-  const { joke } = await getDadJoke();
   const db = getDb().db(dbName);
-  const numberList = await findRecords(db);
+  const joke = await prepareDadJoke(1);
+  const numberList = await findRecords(db, null, subs);
 
   numberList.forEach(({ phoneNumber }) => {
     sendMessage(joke, phoneNumber);
   });
 }
 
-function setupScheduler() {
+function setupScheduler(ruleOptions) {
   const rule = new schedule.RecurrenceRule();
-  return { ...rule, dayOfWeek: [new schedule.Range(1, 5)], hour: 18, minute: 0, tz: 'US/Pacific' };
+  return { ...rule, ...ruleOptions };
 }
 
 (function startSchedule() {
-  const rule = setupScheduler();
+  const scheduleOptions = {
+    dayOfWeek: [new schedule.Range(1, 5)],
+    hour: 18,
+    minute: 0,
+    tz: 'US/Pacific'
+  };
+  const rule = setupScheduler(scheduleOptions);
   schedule.scheduleJob(rule, () => {
     sendJokes();
   });
@@ -150,5 +182,6 @@ initDb(err => {
     }
 
     console.log('Express server listening on port 8000');
+    sendJokes();
   });
 });
