@@ -185,6 +185,5 @@ initDb(err => {
     }
 
     console.log('Express server listening on port 8000');
-    sendJokes();
   });
 });
