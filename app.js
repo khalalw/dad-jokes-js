@@ -115,7 +115,7 @@ async function prepareDadJoke() {
   const db = getDb().db(dbName);
   let record;
   let joke;
-  let isJokeInDb = false;
+  let isJokeInDb;
 
   do {
     const { id: jokeId, joke: _joke } = await fetchDadJoke();
@@ -131,6 +131,7 @@ async function prepareDadJoke() {
     }
   } while (isJokeInDb);
 
+  console.log(`Adding joke to DB`);
   updateDb(db, 'insert', record, prevJokes);
   return joke;
 }
@@ -162,19 +163,6 @@ function setupScheduler(ruleOptions) {
   return { ...rule, ...ruleOptions };
 }
 
-(function startSchedule() {
-  const scheduleOptions = {
-    dayOfWeek: [new schedule.Range(1, 5)],
-    hour: 18,
-    minute: 0,
-    tz: 'US/Pacific'
-  };
-  const rule = setupScheduler(scheduleOptions);
-  schedule.scheduleJob(rule, () => {
-    sendJokes();
-  });
-})();
-
 app.use(urlencoded({ extended: false }));
 app.post('/sms', respondToMessage);
 
@@ -183,7 +171,20 @@ initDb(err => {
     if (err) {
       throw err;
     }
-
     console.log('Express server listening on port 8000');
   });
+
+  (function startSchedule() {
+    const scheduleOptions = {
+      dayOfWeek: [new schedule.Range(1, 5)],
+      hour: 9,
+      minute: 0,
+      tz: 'US/Pacific'
+    };
+    const rule = setupScheduler(scheduleOptions);
+    console.log('Job scheduled');
+    schedule.scheduleJob(rule, () => {
+      sendJokes();
+    });
+  })();
 });
