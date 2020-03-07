@@ -124,8 +124,11 @@ async function prepareDadJoke() {
     const [prevJoke] = await findRecords(db, record, prevJokes);
     isJokeInDb = !!prevJoke;
 
-    isJokeInDb && console.log('Duplicate joke found, fetching another');
-    !isJokeInDb && (joke = _joke);
+    if (isJokeInDb) {
+      console.log('Duplicate joke found, fetching another');
+    } else {
+      joke = _joke;
+    }
   } while (isJokeInDb);
 
   updateDb(db, 'insert', record, prevJokes);
