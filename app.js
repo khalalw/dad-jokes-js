@@ -106,14 +106,15 @@ async function getDadJoke() {
   return response.json();
 }
 
-function sendMessage(body, phoneNumber) {
-  client.messages
-    .create({
-      body,
-      from: outgoingNumber,
-      to: phoneNumber
-    })
-    .then(({ sid }) => console.log(`Messages sent - ${sid}`));
+async function sendMessage(body, phoneNumber) {
+  const createdMessage = await client.messages.create({
+    body,
+    from: outgoingNumber,
+    to: phoneNumber
+  });
+
+  const { sid } = createdMessage;
+  console.log(`Messages sent - ${sid}`);
 }
 
 async function sendJokes() {
@@ -129,11 +130,7 @@ async function sendJokes() {
 
 function setupScheduler() {
   const rule = new schedule.RecurrenceRule();
-  rule.dayOfWeek = [new schedule.Range(1, 5)];
-  rule.hour = 23;
-  rule.minute = 20;
-  rule.tz = 'US/Pacific';
-  return rule;
+  return { ...rule, dayOfWeek: [new schedule.Range(1, 5)], hour: 18, minute: 0, tz: 'US/Pacific' };
 }
 
 (function startSchedule() {
