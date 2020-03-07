@@ -10,7 +10,8 @@ const {
   ACCOUNT_SID: accountSid,
   AUTH_TOKEN: authToken,
   DB: dbName,
-  OUTGOING_NUMBER: outgoingNumber
+  OUTGOING_NUMBER: outgoingNumber,
+  PORT: port
 } = process.env;
 
 const http = require('http');
@@ -153,8 +154,14 @@ async function sendJokes() {
   const joke = await prepareDadJoke(1);
   const numberList = await findRecords(db, null, subs);
 
+  const date = new Date();
+  const day = date.getDate();
+  const month = date.getMonth() + 1;
+
+  const message = `Daily Dad Joke - ${month}/${day}:\n\n${joke}`;
+
   numberList.forEach(({ phoneNumber }) => {
-    sendMessage(joke, phoneNumber);
+    sendMessage(message, phoneNumber);
   });
 }
 
@@ -167,12 +174,14 @@ app.use(urlencoded({ extended: false }));
 app.post('/sms', respondToMessage);
 
 initDb(err => {
-  http.createServer(app).listen(8000, () => {
+  http.createServer(app).listen(port, () => {
     if (err) {
       throw err;
     }
-    console.log('Express server listening on port 8000');
+    console.log(`Express server listening on port ${port}`);
   });
+
+  sendJokes();
 
   (function startSchedule() {
     const scheduleOptions = {
