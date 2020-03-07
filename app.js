@@ -114,7 +114,7 @@ async function sendMessage(body, phoneNumber) {
   });
 
   const { sid } = createdMessage;
-  console.log(`Messages sent - ${sid}`);
+  console.log(`Message sent - ${sid}`);
 }
 
 async function sendJokes() {
