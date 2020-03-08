@@ -36,7 +36,7 @@ function isNumberValid(phoneNumber) {
 
 function handleResponse(incomingMessage) {
   const responses = {
-    dad: `Thank you for signing up for you daily dose of dad jokes. You'll receive one joke everyday. To opt out at any time, reply with STOP.`,
+    dad: `Thank you for signing up for you daily dose of dad jokes. You'll receive one joke everyday at around 9AM PST. To opt out at any time, reply with STOP.`,
     help: `Dad Jokez: If you would like to receive an automated joke once a day, reply DAD. To stop receiving messages completely, reply STOP.`
   };
   return responses[incomingMessage] || responses.help;
@@ -95,6 +95,7 @@ async function respondToMessage(req, res) {
       sendResponse(null, `You're already signed up to receive daily dad jokes.`, twiml, res);
     } else if (optOutKeywords.includes(incomingMsg)) {
       updateDb(db, 'delete', { phoneNumber }, subs);
+      res.end();
     }
   } else if (incomingMsg === 'dad' && !record) {
     updateDb(db, 'insert', { phoneNumber }, subs);
@@ -151,7 +152,7 @@ async function sendMessage(body, phoneNumber) {
 async function sendJokes() {
   console.log('Sending daily message...');
   const db = getDb().db(dbName);
-  const joke = await prepareDadJoke(1);
+  const joke = await prepareDadJoke();
   const numberList = await findRecords(db, null, subs);
 
   const date = new Date();
@@ -180,8 +181,6 @@ initDb(err => {
     }
     console.log(`Express server listening on port ${port}`);
   });
-
-  sendJokes();
 
   (function startSchedule() {
     const scheduleOptions = {
