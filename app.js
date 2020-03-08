@@ -37,7 +37,7 @@ function isNumberValid(phoneNumber) {
 function handleResponse(incomingMessage) {
   const responses = {
     dad: `Thank you for signing up for you daily dose of dad jokes. You'll receive one joke everyday at around 9AM PST. To opt out at any time, reply with STOP.`,
-    help: `Dad Jokez: If you would like to receive an automated joke once a day, reply DAD. To stop receiving messages completely, reply STOP.`
+    help: `Dad Jokes: If you would like to receive an automated joke once a day, reply DAD. To stop receiving messages completely, reply STOP.`
   };
   return responses[incomingMessage] || responses.help;
 }
