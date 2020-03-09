@@ -106,7 +106,7 @@ async function respondToMessage(req, res) {
 
   if (dbAction) {
     updateDb(db, dbAction, { phoneNumber }, subs);
-    dbAction === 'delete' && res.end();
+    isOptingOut && res.end();
   }
 
   if (!isOptingOut) {
