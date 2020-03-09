@@ -83,6 +83,9 @@ async function respondToMessage(req, res) {
   const twiml = new MessagingResponse();
   const incomingMsg = req.body.Body.trim().toLowerCase();
   const phoneNumber = req.body.From;
+  let outgoingMessage;
+  let dbAction;
+  let isOptingOut = false;
 
   if (helpKeywords.includes(incomingMsg) || !isNumberValid(phoneNumber)) {
     res.end();
@@ -92,18 +95,22 @@ async function respondToMessage(req, res) {
 
   if (record) {
     if (incomingMsg === 'dad') {
-      sendResponse(null, `You're already signed up to receive daily dad jokes.`, twiml, res);
+      outgoingMessage = `You're already signed up to receive daily dad jokes.`;
     } else if (optOutKeywords.includes(incomingMsg)) {
-      updateDb(db, 'delete', { phoneNumber }, subs);
-      res.end();
-    } else {
-      sendResponse(incomingMsg, null, twiml, res);
+      isOptingOut = true;
+      dbAction = 'delete';
     }
   } else if (incomingMsg === 'dad' && !record) {
-    updateDb(db, 'insert', { phoneNumber }, subs);
-    sendResponse(incomingMsg, null, twiml, res);
-  } else {
-    sendResponse(incomingMsg, null, twiml, res);
+    dbAction = 'insert';
+  }
+
+  if (dbAction) {
+    updateDb(db, dbAction, { phoneNumber }, subs);
+    dbAction === 'delete' && res.end();
+  }
+
+  if (!isOptingOut) {
+    sendResponse(incomingMsg, outgoingMessage, twiml, res);
   }
 }
 
