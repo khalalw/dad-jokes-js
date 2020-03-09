@@ -96,6 +96,8 @@ async function respondToMessage(req, res) {
     } else if (optOutKeywords.includes(incomingMsg)) {
       updateDb(db, 'delete', { phoneNumber }, subs);
       res.end();
+    } else {
+      sendResponse(incomingMsg, null, twiml, res);
     }
   } else if (incomingMsg === 'dad' && !record) {
     updateDb(db, 'insert', { phoneNumber }, subs);
