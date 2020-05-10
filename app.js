@@ -1,30 +1,20 @@
 /* eslint-disable no-unused-expressions */
-/* eslint-disable no-await-in-loop */
 /* eslint-disable no-console */
 require('dotenv').config();
-
-// Environmental Variables
-const {
-  SUB_COLLECTION: subs,
-  JOKE_COLLECTION: prevJokes,
-  ACCOUNT_SID: accountSid,
-  AUTH_TOKEN: authToken,
-  DB: dbName,
-  OUTGOING_NUMBER: outgoingNumber,
-  PORT: port
-} = process.env;
-
 const http = require('http');
 const { urlencoded } = require('body-parser');
 const app = require('express')();
 
+const { Observable, from, of, combineLatest, forkJoin } = require('rxjs');
+const { map, switchMap, tap, take, finalize, retry } = require('rxjs/operators');
+const axios = require('axios');
+
 const {
   twiml: { MessagingResponse }
 } = require('twilio');
-
-const client = require('twilio')(accountSid, authToken);
+const twilio = require('twilio');
+const client = new twilio(process.env.ACCOUNT_SID, process.env.AUTH_TOKEN);
 const schedule = require('node-schedule');
-const fetch = require('node-fetch');
 
 const { initDb, getDb } = require('./db');
 const { optOutKeywords, helpKeywords } = require('./constants');
@@ -50,129 +40,135 @@ function sendResponse(incomingMessage, outgoingMessage, twiml, res) {
   res.end(twiml.toString());
 }
 
-function findRecords(db, record, collectionName) {
-  return db
-    .collection(collectionName)
-    .find(record || null)
-    .toArray();
+function findRecords$(db, record, collectionName) {
+  return from(
+    db
+      .collection(collectionName)
+      .find(record || null)
+      .toArray()
+  );
 }
 
-function updateDb(db, action, record, collectionName) {
-  let logMessage;
+function updateDb$(db, action, record, collectionName) {
   const collection = db.collection(collectionName);
   const [val] = Object.values(record);
 
-  switch (action) {
-    case 'insert':
-      collection.insertOne(record);
-      logMessage = `One document added - ${val}`;
-      break;
-    case 'delete':
-      collection.deleteOne(record);
-      logMessage = `One document removed - ${val}`;
-      break;
-    default:
-      throw new Error('Please enter a valid action');
-  }
-
-  console.log(logMessage);
+  return of(action).pipe(
+    switchMap(action => {
+      return from(
+        action === 'insert' ? collection.insertOne(record) : collection.deleteOne(record)
+      );
+    }),
+    map(val => !!val.insertedCount),
+    tap(res => console.log(`One document ${(res && 'added') || 'removed'} - ${val}`))
+  );
 }
 
-async function respondToMessage(req, res) {
-  const db = getDb().db(dbName);
+function respondToMessage(req, res) {
+  const db = getDb().db(process.env.DB);
   const twiml = new MessagingResponse();
   const incomingMsg = req.body.Body.trim().toLowerCase();
   const phoneNumber = req.body.From;
   let outgoingMessage;
   let dbAction;
-  let isOptingOut = false;
 
   if (helpKeywords.includes(incomingMsg) || !isNumberValid(phoneNumber)) {
     res.end();
+    return;
   }
 
-  const [record] = await findRecords(db, { phoneNumber }, subs);
-
-  if (record) {
-    if (incomingMsg === 'dad') {
-      outgoingMessage = `You're already signed up to receive daily dad jokes.`;
-    } else if (optOutKeywords.includes(incomingMsg)) {
-      isOptingOut = true;
-      dbAction = 'delete';
-    }
-  } else if (incomingMsg === 'dad' && !record) {
-    dbAction = 'insert';
-  }
-
-  if (dbAction) {
-    updateDb(db, dbAction, { phoneNumber }, subs);
-    isOptingOut && res.end();
-  }
-
-  if (!isOptingOut) {
-    sendResponse(incomingMsg, outgoingMessage, twiml, res);
-  }
+  findRecords$(db, { phoneNumber }, process.env.SUB_COLLECTION)
+    .pipe(
+      map(([record]) => record),
+      tap(record => {
+        if (record) {
+          if (incomingMsg === 'dad') {
+            outgoingMessage = `You're already signed up to receive daily dad jokes.`;
+          } else if (optOutKeywords.includes(incomingMsg)) {
+            dbAction = 'delete';
+          }
+        }
+      }),
+      tap(record => {
+        if (incomingMsg === 'dad' && !record) {
+          dbAction = 'insert';
+        }
+      }),
+      switchMap(() =>
+        dbAction ? updateDb$(db, dbAction, { phoneNumber }, process.env.SUB_COLLECTION) : of(true)
+      ),
+      tap(resAction => resAction && sendResponse(incomingMsg, outgoingMessage, twiml, res)),
+      take(1),
+      finalize(() => res.end())
+    )
+    .subscribe();
 }
 
 // Message scheduling
-async function fetchDadJoke() {
-  const response = await fetch('https://icanhazdadjoke.com/', {
-    headers: { Accept: 'application/json' }
+function fetchDadJoke$() {
+  return new Observable(observer => {
+    axios
+      .get('https://icanhazdadjoke.com/', { headers: { Accept: 'application/json' } })
+      .then(response => {
+        observer.next(response.data);
+        observer.complete();
+      })
+      .catch(err => observer.error(err));
   });
-  return response.json();
 }
 
-async function prepareDadJoke() {
-  const db = getDb().db(dbName);
-  let record;
-  let joke;
-  let isJokeInDb;
-
-  do {
-    const { id: jokeId, joke: _joke } = await fetchDadJoke();
-    record = { jokeId };
-
-    const [prevJoke] = await findRecords(db, record, prevJokes);
-    isJokeInDb = !!prevJoke;
-
-    if (isJokeInDb) {
-      console.log('Duplicate joke found, fetching another');
-    } else {
-      joke = _joke;
-    }
-  } while (isJokeInDb);
-
-  console.log(`Adding joke to DB`);
-  updateDb(db, 'insert', record, prevJokes);
-  return joke;
+function prepareDadJoke$() {
+  const db = getDb().db(process.env.DB);
+  return fetchDadJoke$().pipe(
+    switchMap(data =>
+      findRecords$(db, { jokeId: data.id }, process.env.JOKE_COLLECTION).pipe(
+        map(([prevJoke]) => ({
+          prevJoke,
+          data
+        }))
+      )
+    ),
+    switchMap(({ prevJoke, data }) => {
+      if (prevJoke) {
+        throw new Error('Joke already used, fetching another...');
+      }
+      return updateDb$(db, 'insert', { jokeId: data.id }, process.env.JOKE_COLLECTION).pipe(
+        map(() => data['joke'])
+      );
+    }),
+    retry(25)
+  );
 }
 
-async function sendMessage(body, phoneNumber) {
-  const createdMessage = await client.messages.create({
-    body,
-    from: outgoingNumber,
-    to: phoneNumber
-  });
-
-  const { sid } = createdMessage;
-  console.log(`Message sent - ${sid}`);
+function sendMessage$(body, phoneNumber) {
+  return from(
+    client.messages.create({
+      body,
+      from: process.env.OUTGOING_NUMBER,
+      to: phoneNumber
+    })
+  ).pipe(map(({ sid }) => `Message sent - ${sid}`));
 }
 
-async function sendJokes() {
-  console.log('Sending daily message...');
-  const db = getDb().db(dbName);
-  const joke = await prepareDadJoke();
-  const numberList = await findRecords(db, null, subs);
+function sendJokes() {
+  console.log('Sending daily jokes...');
+  const db = getDb().db(process.env.DB);
 
   const date = new Date();
   const day = date.getDate();
   const month = date.getMonth() + 1;
 
-  const message = `Daily Dad Joke - ${month}/${day}:\n\n${joke}`;
-
-  numberList.forEach(({ phoneNumber }) => {
-    sendMessage(message, phoneNumber);
-  });
+  combineLatest([findRecords$(db, null, process.env.SUB_COLLECTION), prepareDadJoke$()])
+    .pipe(
+      switchMap(([numberList, joke]) => {
+        const message = `Daily Dad Joke - ${month}/${day}:\n\n${joke}`;
+        return forkJoin(numberList.map(({ phoneNumber }) => sendMessage$(message, phoneNumber)));
+      }),
+      tap(messagesLogs => messagesLogs.forEach(message => console.log(message))),
+      take(1),
+      finalize(() => console.log('Daily jokes sent'))
+    )
+    .subscribe();
 }
 
 function setupScheduler(ruleOptions) {
@@ -184,24 +180,22 @@ app.use(urlencoded({ extended: false }));
 app.post('/sms', respondToMessage);
 
 initDb(err => {
-  http.createServer(app).listen(port, () => {
+  http.createServer(app).listen(process.env.PORT, () => {
     if (err) {
       throw err;
     }
-    console.log(`Express server listening on port ${port}`);
-  });
+    console.log(`Express server listening on port ${process.env.PORT}`);
 
-  (function startSchedule() {
-    const scheduleOptions = {
-      dayOfWeek: [new schedule.Range(1, 5)],
-      hour: 9,
-      minute: 0,
-      tz: 'US/Pacific'
-    };
-    const rule = setupScheduler(scheduleOptions);
-    console.log('Job scheduled');
-    schedule.scheduleJob(rule, () => {
-      sendJokes();
-    });
-  })();
+    (function startSchedule() {
+      const scheduleOptions = {
+        dayOfWeek: [new schedule.Range(1, 5)],
+        hour: 9,
+        minute: 0,
+        tz: 'US/Pacific'
+      };
+      const rule = setupScheduler(scheduleOptions);
+      console.log('Job scheduled');
+      schedule.scheduleJob(rule, sendJokes);
+    })();
+  });
 });
